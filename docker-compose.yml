@@ -1,0 +1,73 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: silver-postgres
+    environment:
+      POSTGRES_USER: silver
+      POSTGRES_PASSWORD: silver123
+      POSTGRES_DB: silvervolunteer
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U silver -d silvervolunteer"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    container_name: silver-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: silver
+      DB_PASSWORD: silver123
+      DB_NAME: silvervolunteer
+      DB_SYNC: "true"
+      JWT_SECRET: silver-volunteer-dev-secret
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # 首次启动后执行一次种子数据（幂位：先 TRUNCATE 再写入演示数据）
+  seed:
+    build: ./backend
+    container_name: silver-seed
+    depends_on:
+      backend:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: silver
+      DB_PASSWORD: silver123
+      DB_NAME: silvervolunteer
+      JWT_SECRET: silver-volunteer-dev-secret
+    command:
+      - sh
+      - -c
+      - "until wget -qO- http://backend:3000/api/health >/dev/null 2>&1; do sleep 2; done; node dist/seed-cli.js"
+    restart: "no"
+
+  frontend:
+    build: ./frontend
+    container_name: silver-frontend
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  pgdata:
